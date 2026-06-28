@@ -4,6 +4,7 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+.env
 
 .idea/
 catboost_info/
@@ -12,13 +13,19 @@ data/raw/*.csv
 data/raw/*.csv.gz
 data/interim/*
 data/processed/*
+data/inference/*.csv
+data/predictions/*
 models/*
 reports/figures/*
+logs/*
 
 !data/raw/.gitkeep
 !data/interim/.gitkeep
 !data/processed/.gitkeep
+!data/inference/.gitkeep
+!data/predictions/.gitkeep
 !models/.gitkeep
 !reports/figures/.gitkeep
+!logs/.gitkeep
 
 

@@ -21,9 +21,11 @@ def build_features(
     if trans_history["EventTime"].max() >= p2p_log["EventTime"].min():
         raise ValueError("Transaction history overlaps the current period")
 
-    target = p2p_log["IsFraud"].reset_index(drop=True)
+    target = None
+    if "IsFraud" in p2p_log.columns:
+        target = p2p_log["IsFraud"].reset_index(drop=True)
 
-    p2p_log = p2p_log.drop(columns=["IsFraud"])
+    p2p_log = p2p_log.drop(columns=["IsFraud"], errors="ignore")
     p2p_history = p2p_history.drop(columns=["IsFraud"], errors="ignore")
 
     sender_p2p_feat = (p2p_history

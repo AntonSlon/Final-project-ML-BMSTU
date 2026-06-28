@@ -118,6 +118,100 @@ python main.py
 формирует test-признаки и пересчитывает метрики. Перед запуском файлы модели и
 порога должны находиться в каталоге `models/`.
 
+## Apache Airflow
+
+В проекте реализованы два DAG:
+
+```text
+fraud_model_training
+validate_data → generate_features → train_model → select_threshold → evaluate_model
+
+fraud_batch_inference
+validate_inputs → generate_features → predict → save_predictions
+```
+
+Большие таблицы признаков не передаются через XCom. Задачи сохраняют их в
+`data/processed/`, а через XCom передаются только пути к артефактам.
+
+### Запуск Airflow через Docker
+
+Необходимы Docker Desktop и Docker Compose. На Windows следует использовать
+Linux containers/WSL2. Для Airflow рекомендуется выделить Docker не менее 4 ГБ
+оперативной памяти, лучше 8 ГБ.
+
+Сборка образа:
+
+```bash
+docker compose build
+```
+
+Запуск:
+
+```bash
+docker compose up
+```
+
+Airflow UI будет доступен по адресу:
+
+```text
+http://localhost:8080
+```
+
+Логин и пароль, созданные командой `airflow standalone`, можно найти в логах:
+
+```bash
+docker compose logs airflow
+```
+
+Контейнер использует Airflow 3.2.2. Каталоги `dags`, `data`, `models`, `reports`
+и `logs` подключаются как volumes, поэтому результаты остаются в проекте.
+
+### DAG обучения
+
+Перед запуском положите исходные CSV в `data/raw/`, затем запустите
+`fraud_model_training` в UI или командой:
+
+```bash
+docker compose exec airflow airflow dags trigger fraud_model_training
+```
+
+DAG проверяет входные файлы, строит train/validation/test-признаки, обучает
+модель, выбирает threshold на validation и сохраняет test-метрики.
+
+### DAG пакетного инференса
+
+Сначала должен успешно завершиться DAG обучения. Новый P2P-батч без столбца
+`IsFraud` положите сюда:
+
+```text
+data/inference/new_p2p.csv
+```
+
+Обязательные столбцы:
+
+```text
+EventTime, UserID, RecipientID, Amount, Currency
+```
+
+Запуск:
+
+```bash
+docker compose exec airflow airflow dags trigger fraud_batch_inference
+```
+
+Результат появится в:
+
+```text
+data/predictions/fraud_predictions.csv
+```
+
+К исходным столбцам добавляются:
+
+- `fraud_score` — вероятность мошенничества;
+- `is_fraud_pred` — решение по сохранённому threshold.
+
+Пути можно изменить в `.env`; пример находится в `.env.example`.
+
 ## Временное разбиение и защита от утечки
 
 P2P-журнал сортируется по `EventTime` и разделяется приблизительно в отношении
@@ -186,10 +280,15 @@ random_seed = 42
 
 ```text
 fraud-p2p-detection/
+├── dags/
+│   ├── fraud_training_dag.py
+│   └── fraud_inference_dag.py
 ├── data/
 │   ├── raw/                 исходные данные
 │   ├── interim/             промежуточные данные
-│   └── processed/           подготовленные данные
+│   ├── processed/           артефакты между Airflow-задачами
+│   ├── inference/           новые P2P-батчи
+│   └── predictions/         результаты инференса
 ├── models/                  локальные модели и threshold
 ├── reports/
 │   ├── figures/             графики
@@ -198,11 +297,14 @@ fraud-p2p-detection/
 │   ├── config.py            пути и константы
 │   ├── data.py              загрузка и временное разбиение
 │   ├── features.py          генерация признаков
+│   ├── pipeline.py          функции задач Airflow
 │   ├── train.py             обучение CatBoost
 │   ├── threshold.py         выбор порога
 │   ├── evaluate.py          расчёт метрик
 │   └── utils.py             сохранение модели и отчётов
 ├── main.py                  режимы train и evaluate
+├── Dockerfile
+├── docker-compose.yaml
 ├── requirements.txt
 └── README.md
 ```
@@ -217,21 +319,3 @@ fraud-p2p-detection/
 - Python-кэши;
 - файлы IDE;
 - служебный каталог `catboost_info`.
-
-Модель весит около 700 МБ, поэтому для развёртывания её следует передавать как
-артефакт CI/CD или хранить в общем volume/object storage.
-
-## Ограничения и дальнейшее развитие
-
-Текущая реализация предназначена для пакетного обучения и оценки. Для проекта
-планируется добавить:
-
-- Airflow DAG для обучения;
-- Airflow DAG для пакетного инференса новых данных;
-- Docker Compose для локального запуска Airflow;
-- тесты валидации данных и генерации признаков;
-- GitLab CI для линтинга, тестов и проверки DAG;
-- хранение версий модели и threshold как артефактов.
-
-Онлайн-инференс в реальном времени потребует отдельного сервиса и быстрого
-хранилища исторических агрегатов.

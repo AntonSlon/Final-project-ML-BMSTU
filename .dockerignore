@@ -1,0 +1,11 @@
+.git
+.idea
+.venv
+__pycache__
+*.pyc
+.env
+catboost_info
+data
+models
+reports
+logs

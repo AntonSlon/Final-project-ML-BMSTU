@@ -1,0 +1,30 @@
+services:
+  airflow:
+    build:
+      context: .
+      args:
+        AIRFLOW_VERSION: "3.2.2"
+    container_name: fraud-airflow
+    command: standalone
+    restart: unless-stopped
+    environment:
+      AIRFLOW__CORE__DAGS_FOLDER: /opt/airflow/dags
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      PYTHONPATH: /opt/airflow
+      P2P_DATA_PATH: ${P2P_DATA_PATH:-/opt/airflow/data/raw/final_p2p_log.csv}
+      TRANS_DATA_PATH: ${TRANS_DATA_PATH:-/opt/airflow/data/raw/final_trans_log.csv}
+      INFERENCE_P2P_PATH: ${INFERENCE_P2P_PATH:-/opt/airflow/data/inference/new_p2p.csv}
+      PREDICTIONS_PATH: ${PREDICTIONS_PATH:-/opt/airflow/data/predictions/fraud_predictions.csv}
+    ports:
+      - "8080:8080"
+    volumes:
+      - airflow_home:/opt/airflow
+      - ./dags:/opt/airflow/dags:ro
+      - ./src:/opt/airflow/src:ro
+      - ./data:/opt/airflow/data
+      - ./models:/opt/airflow/models
+      - ./reports:/opt/airflow/reports
+      - ./logs:/opt/airflow/logs
+
+volumes:
+  airflow_home:
