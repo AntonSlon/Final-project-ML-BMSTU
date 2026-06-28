@@ -1,17 +1,32 @@
+import numpy as np
 import pandas as pd
 
 
-def build_features(p2p_log: pd.DataFrame, trans_log: pd.DataFrame):
+def build_features(
+    p2p_log: pd.DataFrame,
+    p2p_history: pd.DataFrame,
+    trans_history: pd.DataFrame,
+):
     p2p_log = p2p_log.copy()
+    p2p_history = p2p_history.copy()
+    trans_history = trans_history.copy()
 
     print(len(p2p_log))
-    print(len(trans_log))
+    print(len(p2p_history))
+    print(len(trans_history))
 
-    target = p2p_log["IsFraud"]
+    if p2p_history["EventTime"].max() >= p2p_log["EventTime"].min():
+        raise ValueError("P2P history overlaps the current period")
+
+    if trans_history["EventTime"].max() >= p2p_log["EventTime"].min():
+        raise ValueError("Transaction history overlaps the current period")
+
+    target = p2p_log["IsFraud"].reset_index(drop=True)
 
     p2p_log = p2p_log.drop(columns=["IsFraud"])
+    p2p_history = p2p_history.drop(columns=["IsFraud"], errors="ignore")
 
-    sender_p2p_feat = (p2p_log
+    sender_p2p_feat = (p2p_history
         .groupby(["UserID"])
         .agg(
             sender_p2p_count=("Amount", "count"),
@@ -28,11 +43,20 @@ def build_features(p2p_log: pd.DataFrame, trans_log: pd.DataFrame):
     )
 
     eps = 1e-6
+    p2p_log["sender_p2p_count"] = p2p_log["sender_p2p_count"].fillna(0)
+    p2p_log["sender_p2p_mean"] = p2p_log["sender_p2p_mean"].fillna(0)
+    p2p_log["sender_p2p_sum"] = p2p_log["sender_p2p_sum"].fillna(0)
     p2p_log["sender_p2p_std"] = p2p_log["sender_p2p_std"].fillna(0)
-    p2p_log["sender_p2p_z_score"] = (p2p_log["Amount"] - p2p_log["sender_p2p_mean"]) / (p2p_log["sender_p2p_std"] + eps)
+    p2p_log["sender_unique_recipients"] = p2p_log["sender_unique_recipients"].fillna(0)
+    p2p_log["sender_p2p_z_score"] = np.where(
+        p2p_log["sender_p2p_count"] > 0,
+        (p2p_log["Amount"] - p2p_log["sender_p2p_mean"])
+        / (p2p_log["sender_p2p_std"] + eps),
+        0,
+    )
 
     recipient_p2p_feat = (
-        p2p_log
+        p2p_history
             .groupby(["RecipientID"])
             .agg(
                 recipient_p2p_count=("Amount", "count"),
@@ -48,25 +72,35 @@ def build_features(p2p_log: pd.DataFrame, trans_log: pd.DataFrame):
         how="left",
     )
 
+    p2p_log["recipient_p2p_count"] = p2p_log["recipient_p2p_count"].fillna(0)
+    p2p_log["recipient_p2p_mean"] = p2p_log["recipient_p2p_mean"].fillna(0)
+    p2p_log["recipient_p2p_sum"] = p2p_log["recipient_p2p_sum"].fillna(0)
     p2p_log["recipient_p2p_std"] = p2p_log["recipient_p2p_std"].fillna(0)
-    p2p_log["recipient_p2p_z_score"] = ((p2p_log["Amount"] - p2p_log["recipient_p2p_mean"])
-                                        / (p2p_log["recipient_p2p_std"] + eps))
-
-    p2p_log["sender_p2p_amount_ratio"] = (
-            p2p_log["Amount"] / (p2p_log["sender_p2p_mean"] + eps)
+    p2p_log["recipient_unique_senders"] = p2p_log["recipient_unique_senders"].fillna(0)
+    p2p_log["recipient_p2p_z_score"] = np.where(
+        p2p_log["recipient_p2p_count"] > 0,
+        (p2p_log["Amount"] - p2p_log["recipient_p2p_mean"])
+        / (p2p_log["recipient_p2p_std"] + eps),
+        0,
     )
 
-    p2p_log["recipient_p2p_amount_ratio"] = (
-            p2p_log["Amount"] / (p2p_log["recipient_p2p_mean"] + eps)
+    p2p_log["sender_p2p_amount_ratio"] = np.where(
+        p2p_log["sender_p2p_count"] > 0,
+        p2p_log["Amount"] / (p2p_log["sender_p2p_mean"] + eps),
+        0,
+    )
+
+    p2p_log["recipient_p2p_amount_ratio"] = np.where(
+        p2p_log["recipient_p2p_count"] > 0,
+        p2p_log["Amount"] / (p2p_log["recipient_p2p_mean"] + eps),
+        0,
     )
 
     """фичи для trans"""
 
-    trans_log = trans_log.copy()
-
-    print(trans_log.columns)
+    print(trans_history.columns)
     sender_trans_feat = (
-        trans_log
+        trans_history
             .groupby("UserID")
             .agg(
                 sender_trans_count=("Amount", "count"),
@@ -84,8 +118,31 @@ def build_features(p2p_log: pd.DataFrame, trans_log: pd.DataFrame):
         how="left",
     )
 
-    p2p_log["pairs_p2p_count"] = (p2p_log
-                                  .groupby(["UserID", "RecipientID"])["Amount"].transform("count"))
+    trans_columns = [
+        "sender_trans_count",
+        "sender_trans_mean",
+        "sender_trans_sum",
+        "sender_trans_std",
+        "sender_unique_merchant",
+        "trans_success_rate",
+        "trans_unique_countries",
+    ]
+    p2p_log[trans_columns] = p2p_log[trans_columns].fillna(0)
+
+    pairs_p2p_feat = (
+        p2p_history
+            .groupby(["UserID", "RecipientID"])
+            .size()
+            .rename("pairs_p2p_count")
+            .reset_index()
+    )
+
+    p2p_log = p2p_log.merge(
+        pairs_p2p_feat,
+        on=["UserID", "RecipientID"],
+        how="left",
+    )
+    p2p_log["pairs_p2p_count"] = p2p_log["pairs_p2p_count"].fillna(0)
 
     p2p_log["hour"] = p2p_log["EventTime"].dt.hour
     p2p_log["dayofweek"] = p2p_log["EventTime"].dt.dayofweek
