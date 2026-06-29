@@ -319,3 +319,15 @@ fraud-p2p-detection/
 - Python-кэши;
 - файлы IDE;
 - служебный каталог `catboost_info`.
+
+## GitLab CI
+
+При каждом push и merge request GitLab запускает задачу `python_syntax`, которая
+проверяет синтаксис `main.py`, модулей и DAG-файлов.
+
+Полное обучение модели не запускается в CI: исходные данные и обученная модель
+не хранятся в Git. Аналогичную проверку можно запустить локально:
+
+```bash
+python -m compileall -q main.py src dags
+```
